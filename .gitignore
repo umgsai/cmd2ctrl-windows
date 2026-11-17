@@ -1,0 +1,15 @@
+# 编译产物
+*.exe
+*.pdb
+*.dll
+bin/
+obj/
+
+# 本机配置与日志（默认配置见 config.example.ini）
+config.ini
+log.txt
+
+# IDE / 用户文件
+.vs/
+*.user
+*.suo
