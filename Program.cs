@@ -56,6 +56,7 @@ internal static class Program
     private static bool _winDown;        // 物理 Win 是否按下（已被钩子吞掉）
     private static bool _winForwarded;   // 是否已把 Win down 转发给系统
     private static bool _mappedHandled;  // 本次 Win 按下是否已用于映射
+    private static volatile bool _paused; // 暂停映射：所有按键原样放行
     private static readonly HashSet<uint> _swallowedKeys = new HashSet<uint>(); // down 被吞的键，up 也吞
     private static readonly HashSet<uint> _forwardedKeys = new HashSet<uint>(); // 已转发给系统的键
 
@@ -169,18 +170,24 @@ internal static class Program
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
-    // 托盘图标：使用编译时内嵌的 icon.png 资源，缺失时退回系统默认图标
-    private static Icon CreateTrayIcon()
+    // 托盘图标：使用编译时内嵌的 icon.png 资源；暂停时输出灰度半透明版本
+    private static Icon CreateTrayIcon(bool paused)
     {
         try
         {
-            using (Stream stream = typeof(Program).Assembly.GetManifestResourceStream("icon.png"))
+            using (Bitmap source = LoadEmbeddedIcon())
             {
-                if (stream != null)
+                if (source != null)
                 {
-                    using (Bitmap bmp = new Bitmap(stream))
+                    Bitmap render = source;
+                    try
                     {
-                        IntPtr hIcon = bmp.GetHicon();
+                        if (paused)
+                        {
+                            render = ToGrayscale(source);
+                        }
+
+                        IntPtr hIcon = render.GetHicon();
                         try
                         {
                             return (Icon)Icon.FromHandle(hIcon).Clone(); // 复制一份，随后释放原始句柄
@@ -188,6 +195,13 @@ internal static class Program
                         finally
                         {
                             DestroyIcon(hIcon);
+                        }
+                    }
+                    finally
+                    {
+                        if (!ReferenceEquals(render, source))
+                        {
+                            render.Dispose();
                         }
                     }
                 }
@@ -201,6 +215,45 @@ internal static class Program
         }
 
         return SystemIcons.Application;
+    }
+
+    private static Bitmap LoadEmbeddedIcon()
+    {
+        using (Stream stream = typeof(Program).Assembly.GetManifestResourceStream("icon.png"))
+        {
+            if (stream == null)
+            {
+                return null;
+            }
+
+            using (Bitmap raw = new Bitmap(stream))
+            {
+                return new Bitmap(raw); // 复制一份，避免与资源流绑定
+            }
+        }
+    }
+
+    private static Bitmap ToGrayscale(Bitmap source)
+    {
+        Bitmap result = new Bitmap(source.Width, source.Height);
+        using (Graphics g = Graphics.FromImage(result))
+        using (System.Drawing.Imaging.ImageAttributes attributes = new System.Drawing.Imaging.ImageAttributes())
+        {
+            System.Drawing.Imaging.ColorMatrix matrix = new System.Drawing.Imaging.ColorMatrix(new float[][]
+            {
+                new float[] { 0.299f, 0.299f, 0.299f, 0f, 0f },
+                new float[] { 0.587f, 0.587f, 0.587f, 0f, 0f },
+                new float[] { 0.114f, 0.114f, 0.114f, 0f, 0f },
+                new float[] { 0f, 0f, 0f, 0.55f, 0f },   // 同时降低不透明度，表达“已暂停”
+                new float[] { 0f, 0f, 0f, 0f, 1f },
+            });
+            attributes.SetColorMatrix(matrix, System.Drawing.Imaging.ColorMatrixFlag.Default,
+                System.Drawing.Imaging.ColorAdjustType.Bitmap);
+            g.DrawImage(source, new Rectangle(0, 0, source.Width, source.Height),
+                0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attributes);
+        }
+
+        return result;
     }
 
     private static INPUT MakeKey(uint vk, bool keyUp)
@@ -339,6 +392,17 @@ internal static class Program
             return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
         }
 
+        // 暂停映射：所有按键原样放行，Win 完全交还系统
+        if (_paused)
+        {
+            _winDown = false;
+            _winForwarded = false;
+            _mappedHandled = false;
+            _swallowedKeys.Clear();
+            _forwardedKeys.Clear();
+            return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+        }
+
         if (k.vkCode == VK_LWIN || k.vkCode == VK_RWIN)
         {
             if (down)
@@ -433,7 +497,20 @@ internal static class Program
             }
             Log("start hook=" + _hook + " log=" + LogPath);
 
+            Icon trayIcon = CreateTrayIcon(false);
+            NotifyIcon tray = new NotifyIcon();
+            tray.Icon = trayIcon;
+            tray.Text = TrayText(false);
+            tray.Visible = true;
+
             ContextMenuStrip menu = new ContextMenuStrip();
+
+            ToolStripMenuItem enableItem = new ToolStripMenuItem("启用映射");
+            enableItem.CheckOnClick = true;
+            enableItem.Checked = true;
+            enableItem.CheckedChanged += new EventHandler(delegate { OnToggleMapping(enableItem, tray); });
+            menu.Items.Add(enableItem);
+
             menu.Items.Add("重新加载配置", null, new EventHandler(OnReloadConfig));
 
             ToolStripMenuItem autoStart = new ToolStripMenuItem("开机自动启动");
@@ -445,11 +522,6 @@ internal static class Program
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, new EventHandler(OnExit));
 
-            Icon trayIcon = CreateTrayIcon();
-            NotifyIcon tray = new NotifyIcon();
-            tray.Icon = trayIcon;
-            tray.Text = "Cmd(Win) 已映射为 Ctrl";
-            tray.Visible = true;
             tray.ContextMenuStrip = menu;
 
             Application.EnableVisualStyles();
@@ -465,6 +537,33 @@ internal static class Program
     private static void OnReloadConfig(object sender, EventArgs e)
     {
         LoadConfig();
+    }
+
+    private static void OnToggleMapping(ToolStripMenuItem item, NotifyIcon tray)
+    {
+        _paused = !item.Checked;
+
+        // 切换时清空按键状态，避免暂停/恢复后出现“Win 卡住”
+        _winDown = false;
+        _winForwarded = false;
+        _mappedHandled = false;
+        _swallowedKeys.Clear();
+        _forwardedKeys.Clear();
+
+        Icon old = tray.Icon;
+        tray.Icon = CreateTrayIcon(_paused);
+        if (old != null && !ReferenceEquals(old, SystemIcons.Application))
+        {
+            old.Dispose();
+        }
+        tray.Text = TrayText(_paused);
+
+        Log("mapping paused=" + _paused);
+    }
+
+    private static string TrayText(bool paused)
+    {
+        return paused ? "Cmd 映射已暂停（Win 保持系统行为）" : "Cmd(Win) 已映射为 Ctrl";
     }
 
     private static string AutoStartCommand()

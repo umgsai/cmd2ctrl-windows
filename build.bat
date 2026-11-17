@@ -25,8 +25,17 @@ if not exist "%ICON%" (
     exit /b 1
 )
 
+echo Generating app.ico from icon.png...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%make-icon.ps1"
+if errorlevel 1 (
+    echo [ERROR] Failed to generate app.ico.
+    pause
+    exit /b 1
+)
+set "ICO=%ROOT%app.ico"
+
 echo Building CmdKeyMapper...
-"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /out:"%ROOT%CmdKeyMapper.exe" /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /resource:"%ICON%" "%ROOT%Program.cs"
+"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /out:"%ROOT%CmdKeyMapper.exe" /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /resource:"%ICON%" /win32icon:"%ICO%" "%ROOT%Program.cs"
 
 if errorlevel 1 (
     echo [ERROR] Build failed.
