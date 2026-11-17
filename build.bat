@@ -18,8 +18,15 @@ if not errorlevel 1 (
     exit /b 1
 )
 
+set "ICON=%ROOT%icon.png"
+if not exist "%ICON%" (
+    echo [ERROR] icon.png not found: %ICON%
+    pause
+    exit /b 1
+)
+
 echo Building CmdKeyMapper...
-"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /out:"%ROOT%CmdKeyMapper.exe" /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll "%ROOT%Program.cs"
+"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /out:"%ROOT%CmdKeyMapper.exe" /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /resource:"%ICON%" "%ROOT%Program.cs"
 
 if errorlevel 1 (
     echo [ERROR] Build failed.

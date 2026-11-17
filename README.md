@@ -11,7 +11,7 @@
 - 未配置的组合（`Win+E`、`Win+D`、`Win+Tab` 等）保持系统原生行为
 - 单击 `Command` 仍可正常打开开始菜单
 - 无需安装 .NET SDK，不依赖额外运行时（使用系统自带 .NET Framework 4.8）
-- 托盘图标读取 exe 同目录的 `icon.png`（仓库自带），文件缺失或损坏时自动退回系统默认图标
+- 托盘图标（`icon.png`）在编译时内嵌进 exe，可单独分发；更换图标后需重新编译
 
 ## 工作原理
 
@@ -51,7 +51,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 2. 右键托盘图标可**重新加载配置**、勾选**开机自动启动**或**退出**；
 3. 修改 `config.ini` 后无需重启，点“重新加载配置”即可。
 
-> `CmdKeyMapper.exe` 需与 `icon.png`、`config.ini` 放在同一目录；分发时请一并打包，单独拷贝 exe 会使用系统默认托盘图标（功能不受影响）。
+> `icon.png` 已在编译时内嵌进 exe，发布时只需分发 `CmdKeyMapper.exe`；`config.ini` 会在首次运行时自动生成。
 
 ### 开机自动启动
 

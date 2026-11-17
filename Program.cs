@@ -169,33 +169,35 @@ internal static class Program
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
-    // 托盘图标：读取 exe 同目录的 icon.png；缺失或损坏时退回系统默认图标
+    // 托盘图标：使用编译时内嵌的 icon.png 资源，缺失时退回系统默认图标
     private static Icon CreateTrayIcon()
     {
         try
         {
-            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png");
-            if (File.Exists(path))
+            using (Stream stream = typeof(Program).Assembly.GetManifestResourceStream("icon.png"))
             {
-                using (Bitmap bmp = new Bitmap(path))
+                if (stream != null)
                 {
-                    IntPtr hIcon = bmp.GetHicon();
-                    try
+                    using (Bitmap bmp = new Bitmap(stream))
                     {
-                        return (Icon)Icon.FromHandle(hIcon).Clone(); // 复制一份，随后释放原始句柄
-                    }
-                    finally
-                    {
-                        DestroyIcon(hIcon);
+                        IntPtr hIcon = bmp.GetHicon();
+                        try
+                        {
+                            return (Icon)Icon.FromHandle(hIcon).Clone(); // 复制一份，随后释放原始句柄
+                        }
+                        finally
+                        {
+                            DestroyIcon(hIcon);
+                        }
                     }
                 }
             }
 
-            Log("tray icon: icon.png 不存在，使用系统默认图标");
+            Log("tray icon: 内嵌 icon.png 资源不存在，使用系统默认图标");
         }
         catch (Exception ex)
         {
-            Log("tray icon: 加载 icon.png 失败 - " + ex.Message);
+            Log("tray icon: 加载内嵌图标失败 - " + ex.Message);
         }
 
         return SystemIcons.Application;
