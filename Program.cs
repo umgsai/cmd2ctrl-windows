@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -164,6 +165,41 @@ internal static class Program
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
+    // 托盘图标：读取 exe 同目录的 icon.png；缺失或损坏时退回系统默认图标
+    private static Icon CreateTrayIcon()
+    {
+        try
+        {
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png");
+            if (File.Exists(path))
+            {
+                using (Bitmap bmp = new Bitmap(path))
+                {
+                    IntPtr hIcon = bmp.GetHicon();
+                    try
+                    {
+                        return (Icon)Icon.FromHandle(hIcon).Clone(); // 复制一份，随后释放原始句柄
+                    }
+                    finally
+                    {
+                        DestroyIcon(hIcon);
+                    }
+                }
+            }
+
+            Log("tray icon: icon.png 不存在，使用系统默认图标");
+        }
+        catch (Exception ex)
+        {
+            Log("tray icon: 加载 icon.png 失败 - " + ex.Message);
+        }
+
+        return SystemIcons.Application;
+    }
 
     private static INPUT MakeKey(uint vk, bool keyUp)
     {
@@ -407,8 +443,9 @@ internal static class Program
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, new EventHandler(OnExit));
 
+            Icon trayIcon = CreateTrayIcon();
             NotifyIcon tray = new NotifyIcon();
-            tray.Icon = System.Drawing.SystemIcons.Application;
+            tray.Icon = trayIcon;
             tray.Text = "Cmd(Win) 已映射为 Ctrl";
             tray.Visible = true;
             tray.ContextMenuStrip = menu;
@@ -418,6 +455,7 @@ internal static class Program
 
             tray.Visible = false;
             tray.Dispose();
+            trayIcon.Dispose();
             menu.Dispose();
         }
     }
@@ -497,4 +535,5 @@ internal static class Program
         }
         Application.Exit();
     }
+
 }
